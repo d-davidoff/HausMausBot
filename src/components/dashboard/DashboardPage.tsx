@@ -2,8 +2,7 @@ import { DateTimeDisplay } from "./clock/DateTimeDisplay";
 import { GoogleCalendarConnection } from "./calendar/GoogleCalendarConnection";
 import { CalendarAgenda } from "./agenda/CalendarAgenda";
 import { CountdownList } from "./countdown/CountdownList";
-
-const line = "h-2.5 rounded-full bg-ink/[0.1]";
+import { TodayTasks } from "./tasks/TodayTasks";
 
 export default function DashboardPage() {
   return (
@@ -22,15 +21,9 @@ export default function DashboardPage() {
 
       <aside
         aria-label="Tasks"
-        className="flex min-h-32 min-w-0 flex-col justify-center gap-3 md:col-start-3 md:row-start-2 md:overflow-y-auto"
+        className="flex min-h-0 min-w-0 flex-col gap-4 overflow-hidden rounded-xl border border-hairline bg-card p-5 md:col-start-3 md:row-start-2 md:max-h-full md:self-start md:overflow-y-auto md:overscroll-contain"
       >
-        <div aria-hidden="true" className="h-3 w-1/3 self-end rounded-full bg-ink/[0.1]" />
-        <div aria-hidden="true" className="flex min-h-40 flex-col gap-4 rounded-xl border border-hairline bg-card p-5">
-          <div className={`${line} w-2/5`} />
-          <div className={`${line} w-full`} />
-          <div className={`${line} w-5/6`} />
-          <div className={`${line} w-11/12`} />
-        </div>
+        <TodayTasks />
       </aside>
 
       <div className="col-start-1 row-start-5 w-full min-w-0 md:col-start-2 md:col-span-2 md:row-start-3">

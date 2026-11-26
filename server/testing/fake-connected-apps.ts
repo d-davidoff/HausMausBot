@@ -2,14 +2,26 @@
 // endpoint that answers the Google tools the way Composio's multi-execute tool does, as the default connected account.
 import { createServer } from "node:http";
 
-import { CALENDAR_LIST_TOOL, CALENDARS_TOOL, GMAIL_FETCH_TOOL, GMAIL_MESSAGE_TOOL, GMAIL_PROFILE_TOOL, GMAIL_THREAD_TOOL, OUTLOOK_LIST_TOOL, OUTLOOK_MESSAGE_TOOL } from "../connected-reads.ts";
+import {
+  CALENDAR_LIST_TOOL,
+  CALENDARS_TOOL,
+  GMAIL_FETCH_TOOL,
+  GMAIL_MESSAGE_TOOL,
+  GMAIL_PROFILE_TOOL,
+  GMAIL_THREAD_TOOL,
+  OUTLOOK_LIST_TOOL,
+  OUTLOOK_MESSAGE_TOOL,
+  TASK_LISTS_TOOL,
+  TASK_PATCH_TOOL,
+  TASKS_LIST_TOOL,
+} from "../connected-reads.ts";
 
 export interface FakeConnectedApps {
   url: string;
   token: string;
   connected: Record<string, boolean>;
   /** The connected accounts the list names per app. */
-  accounts: Record<string, Array<{ id: string; status: string }>>;
+  accounts: Record<string, Array<{ id: string; alias?: string; status: string }>>;
   /** While set, the connected list answers this many more times, then HTTP 503 until cleared. */
   inventoryFailsAfter?: number;
   address: string;
@@ -18,6 +30,19 @@ export interface FakeConnectedApps {
   /** Composio GMAIL_FETCH_EMAILS messages. */
   emails: unknown[];
   calendars: unknown[];
+  /** Google Tasks lists and tasks by list ID (or per-account via tasksByAccount). */
+  taskLists: Array<{ id: string; title: string }>;
+  tasksByList: Record<string, Array<Record<string, unknown>>>;
+  tasksByAccount?: Record<string, {
+    taskLists: Array<{ id: string; title: string }>;
+    tasksByList: Record<string, Array<Record<string, unknown>>>;
+  }>;
+  taskListsPageSize?: number;
+  tasksPageSize?: number;
+  tasksError?: string;
+  taskPatchError?: string;
+  taskPatchDelayMs?: number;
+  taskNow?: () => string;
   /** Microsoft Graph message resources, as Composio's Outlook tools pass them on. */
   outlook: unknown[];
   /** A thread's messages by thread id; unset, the inbox entries with that thread id. */
@@ -42,10 +67,65 @@ export async function startFakeConnectedApps(): Promise<FakeConnectedApps> {
   const fake: Omit<FakeConnectedApps, "url" | "token" | "close"> = {
     connected: { gmail: true, googlecalendar: true }, accounts: {}, address: "me@example.test", events: [], emails: [], calls: [], threads: {}, outlook: [], uploads: [],
     calendars: [{ id: "me@example.test", primary: true, accessRole: "owner", selected: true }],
+    taskLists: [],
+    tasksByList: {},
   };
 
-  function answer(slug: string, args: unknown): unknown {
+  function paginate<T>(all: readonly T[], args: unknown, defaultPageSize: number | undefined): { page: T[]; nextPageToken?: string } {
+    const requestedSize = typeof field(args, "maxResults") === "number" ? Number(field(args, "maxResults")) : all.length;
+    const size = defaultPageSize ? Math.min(defaultPageSize, requestedSize) : requestedSize;
+    const offset = typeof field(args, "pageToken") === "string" ? Number(field(args, "pageToken")) : 0;
+    const safeOffset = Number.isInteger(offset) && offset >= 0 ? offset : 0;
+    const slice = all.slice(safeOffset, safeOffset + Math.max(1, size));
+    const nextOffset = safeOffset + slice.length;
+    return nextOffset < all.length ? { page: slice, nextPageToken: String(nextOffset) } : { page: slice };
+  }
+
+  async function answer(slug: string, args: unknown, account?: string): Promise<unknown> {
     if (slug.startsWith("GMAIL_") && fake.gmailError) throw new ToolFailure(fake.gmailError);
+    if (slug.startsWith("GOOGLETASKS_")) {
+      if (slug === TASK_PATCH_TOOL && fake.taskPatchDelayMs) {
+        await new Promise((resolve) => setTimeout(resolve, fake.taskPatchDelayMs));
+      }
+      if (slug === TASK_PATCH_TOOL && fake.taskPatchError) throw new ToolFailure(fake.taskPatchError);
+      if (slug !== TASK_PATCH_TOOL && fake.tasksError) throw new ToolFailure(fake.tasksError);
+      const scoped = account && fake.tasksByAccount?.[account];
+      const taskLists = scoped ? scoped.taskLists : fake.taskLists;
+      const tasksByList = scoped ? scoped.tasksByList : fake.tasksByList;
+      if (slug === TASK_LISTS_TOOL) {
+        const { page, nextPageToken } = paginate(taskLists, args, fake.taskListsPageSize);
+        return { items: page, ...(nextPageToken ? { nextPageToken } : {}) };
+      }
+      if (slug === TASKS_LIST_TOOL) {
+        const listId = String(field(args, "tasklist_id") ?? "");
+        const all = tasksByList[listId];
+        if (!all) throw new ToolFailure(NOT_FOUND);
+        const filtered = all.filter((task) => {
+          if (field(args, "showDeleted") === false && task.deleted === true) return false;
+          if (field(args, "showCompleted") === false && task.status === "completed") return false;
+          if (field(args, "showHidden") === false && task.hidden === true) return false;
+          return true;
+        });
+        const { page, nextPageToken } = paginate(filtered, args, fake.tasksPageSize);
+        return { tasks: page, ...(nextPageToken ? { nextPageToken } : {}) };
+      }
+      if (slug === TASK_PATCH_TOOL) {
+        const listId = String(field(args, "tasklist_id") ?? "");
+        const taskId = String(field(args, "task_id") ?? "");
+        const status = field(args, "status");
+        const list = tasksByList[listId];
+        const task = list?.find((item) => item.id === taskId && item.deleted !== true);
+        if (!task) throw new ToolFailure(NOT_FOUND);
+        if (status === "completed") {
+          task.status = "completed";
+          task.completed = fake.taskNow?.() ?? new Date().toISOString();
+        } else if (status === "needsAction") {
+          task.status = "needsAction";
+          delete task.completed;
+        }
+        return { ...task };
+      }
+    }
     if (slug === CALENDAR_LIST_TOOL) return { items: fake.events };
     if (slug === CALENDARS_TOOL) return { items: fake.calendars };
     if (slug === GMAIL_FETCH_TOOL) {
@@ -122,7 +202,8 @@ export async function startFakeConnectedApps(): Promise<FakeConnectedApps> {
         fake.calls.push({ tool: slug, arguments: item.arguments, item });
         let response: { successful: boolean; data: unknown; error: string | null };
         try {
-          response = { successful: true, data: answer(slug, item.arguments), error: null };
+          const account = typeof item.account === "string" ? item.account : undefined;
+          response = { successful: true, data: await answer(slug, item.arguments, account), error: null };
         } catch (error) {
           if (!(error instanceof ToolFailure)) throw error;
           response = { successful: false, data: null, error: error.message };

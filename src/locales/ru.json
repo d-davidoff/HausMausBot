@@ -7495,5 +7495,7 @@
   "server.github.card.description": "Подключите GitHub, чтобы {bot} мог отправлять работу в ваши репозитории.",
   "server.github.card.connectInApps": "Подключите GitHub через эту карточку в приложении на компьютере или в разделе «Приложения».",
   "githubSignIn.title": "Вход в GitHub",
-  "githubSignIn.tokenPlaceholder": "github_pat_…"
+  "githubSignIn.tokenPlaceholder": "github_pat_…",
+  "dashboard.tasks.title": "Мои задачи",
+  "dashboard.tasks.openGoogleTasks": "Открыть Google Задачи"
 }

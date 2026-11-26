@@ -530,6 +530,9 @@ export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: Reg
   // answers with a token (routes/github-sign-in.ts)
   { methods: ["GET"], path: /^\/api\/github\/sign-in$/ },
   { methods: ["POST"], path: /^\/api\/github\/sign-in\/(?:start|cancel|token|sign-out)$/ },
+  // Dashboard Google Tasks: the handler checks family membership, connection access, and selected account per request.
+  { methods: ["GET", "PUT"], path: /^\/api\/dashboard\/tasks$/ },
+  { methods: ["POST"], path: /^\/api\/dashboard\/tasks\/lists\/[^/]+\/tasks\/[^/]+\/(?:complete|reopen)$/ },
 ];
 
 export function requiredScope(method: string, path: string, features: { sharedComputers?: boolean } = {}): Scope {

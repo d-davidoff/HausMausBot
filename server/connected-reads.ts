@@ -7,6 +7,7 @@ import { parseMcpResponse } from "./connector-tools-list.ts";
 
 export const READ_APPS = ["gmail", "outlook", "googlecalendar"] as const;
 export type ReadApp = (typeof READ_APPS)[number];
+export type ConnectedApp = ReadApp | "googletasks";
 export type MailApp = "gmail" | "outlook";
 
 export interface CalendarEvent {
@@ -54,21 +55,35 @@ const SIGNED_OUT = /\b(?:unauthori[sz]ed|unauthenticated|invalid[_ ]grant|expire
 
 /** A read that failed: the app, what went wrong, and whether reconnecting the app is what fixes it. */
 export class SourceError extends Error {
-  readonly app: ReadApp;
+  readonly app: ConnectedApp;
   readonly signedOut: boolean;
   /** The read named one of the app's several connected accounts, so that account is the one to check. */
   readonly severalAccounts: boolean;
-  constructor(app: ReadApp, message: string, severalAccounts = false) {
+  readonly timedOut: boolean;
+  readonly transport: boolean;
+  readonly toolError: boolean;
+  constructor(
+    app: ConnectedApp,
+    message: string,
+    severalAccounts = false,
+    details: { timedOut?: boolean; transport?: boolean; toolError?: boolean } = {},
+  ) {
     super(message);
     this.app = app;
     this.signedOut = SIGNED_OUT.test(message);
     this.severalAccounts = severalAccounts;
+    this.timedOut = details.timedOut === true;
+    this.transport = details.transport === true;
+    this.toolError = details.toolError === true;
     this.name = "SourceError";
   }
 }
 
 export const CALENDAR_LIST_TOOL = "GOOGLECALENDAR_EVENTS_LIST";
 export const CALENDARS_TOOL = "GOOGLECALENDAR_LIST_CALENDARS";
+export const TASK_LISTS_TOOL = "GOOGLETASKS_LIST_TASK_LISTS";
+export const TASKS_LIST_TOOL = "GOOGLETASKS_LIST_TASKS";
+export const TASK_PATCH_TOOL = "GOOGLETASKS_PATCH_TASK";
 export const GMAIL_FETCH_TOOL = "GMAIL_FETCH_EMAILS";
 export const GMAIL_PROFILE_TOOL = "GMAIL_GET_PROFILE";
 export const GMAIL_MESSAGE_TOOL = "GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID";
@@ -78,6 +93,9 @@ export const OUTLOOK_MESSAGE_TOOL = "OUTLOOK_GET_MESSAGE";
 const CALENDAR_READS_AT_ONCE = 4;
 const CALENDAR_PAGES = 20;
 const CALENDAR_NAME_MAX = 80;
+const TASKS_READS_AT_ONCE = 4;
+const TASKS_PAGES = 20;
+const TASKS_LIST_NAME_MAX = 120;
 const GOOGLE_NOT_FOUND = /\brequested entity was not found\b/i;
 const MESSAGE_WORD = /\b(?:message|email|thread)\b/i;
 const MISSING_WORD = /\b(?:not found|deleted|no longer exists)\b/i;
@@ -418,6 +436,107 @@ export function calendarChoicesFromData(data: unknown): Array<{ id: string; name
   });
 }
 
+export interface GoogleTaskList {
+  id: string;
+  title: string;
+}
+
+export interface GoogleTaskItem {
+  id: string;
+  listId: string;
+  title: string;
+  status: "needsAction" | "completed";
+  due?: string;
+  completed?: string;
+  notes?: string;
+}
+
+export interface GoogleTaskPatchResult {
+  id: string;
+  status: "completed" | "needsAction";
+  completed?: string;
+}
+
+function emptyTasksEnvelope(data: unknown, keys: readonly string[]): boolean {
+  for (const body of [record(data), record(record(data)?.response_data)]) {
+    if (!body) continue;
+    const hasCollectionKey = keys.some((key) => key in body);
+    if (!hasCollectionKey && (typeof body.kind === "string" || typeof body.etag === "string")) {
+      return true;
+    }
+  }
+  return false;
+}
+
+export function taskListsFromData(data: unknown): GoogleTaskList[] {
+  const keys = ["items", "task_lists", "taskLists"] as const;
+  const list = listIn(data, keys);
+  if (!list) {
+    if (emptyTasksEnvelope(data, keys)) return [];
+    throw new Error("the Google Tasks answer had no task list array");
+  }
+  const lists = list.flatMap((raw): GoogleTaskList[] => {
+    const item = record(raw);
+    if (!item || typeof item.id !== "string" || !item.id.trim()) return [];
+    return [{ id: item.id, title: oneLine(item.title, TASKS_LIST_NAME_MAX) || "Tasks" }];
+  });
+  if (list.length > 0 && lists.length === 0) throw new Error("none of the Google task lists could be read");
+  return lists;
+}
+
+export function tasksFromData(data: unknown, listId: string): GoogleTaskItem[] {
+  const keys = ["tasks", "items"] as const;
+  const list = listIn(data, keys);
+  if (!list) {
+    if (emptyTasksEnvelope(data, keys)) return [];
+    throw new Error("the Google Tasks answer had no task array");
+  }
+  let skipped = 0;
+  const items = list.flatMap((raw): GoogleTaskItem[] => {
+    const item = record(raw);
+    if (!item || typeof item.id !== "string" || !item.id.trim()) return [];
+    if (item.deleted === true) {
+      skipped += 1;
+      return [];
+    }
+    if (item.status !== "needsAction" && item.status !== "completed") {
+      skipped += 1;
+      return [];
+    }
+    const due = typeof item.due === "string" && item.due.trim() ? item.due.trim() : undefined;
+    const completed = typeof item.completed === "string" && item.completed.trim() ? item.completed.trim() : undefined;
+    const notes = typeof item.notes === "string" && item.notes ? item.notes : undefined;
+    return [{
+      id: item.id,
+      listId,
+      title: flat(item.title) || "Untitled task",
+      status: item.status,
+      ...(due ? { due } : {}),
+      ...(completed ? { completed } : {}),
+      ...(notes ? { notes } : {}),
+    }];
+  });
+  if (list.length > skipped && items.length === 0) throw new Error("none of the Google tasks could be read");
+  return items;
+}
+
+export function patchedTaskFromData(data: unknown, expectedTaskId: string): GoogleTaskPatchResult {
+  const top = record(data);
+  const item = record(top?.task) ?? record(top?.response_data) ?? top;
+  if (!item || (item.status !== "completed" && item.status !== "needsAction")) {
+    throw new Error("the Google Tasks update answer had no valid task status");
+  }
+  if (typeof item.id === "string" && item.id && item.id !== expectedTaskId) {
+    throw new Error("the Google Tasks update answer returned a different task");
+  }
+  const completed = typeof item.completed === "string" && item.completed.trim() ? item.completed.trim() : undefined;
+  return {
+    id: typeof item.id === "string" && item.id ? item.id : expectedTaskId,
+    status: item.status,
+    ...(completed ? { completed } : {}),
+  };
+}
+
 export const READ_TIMEOUT_MS = 60_000;
 
 /** `promise`, or a rejection with the signal's reason once `signal` aborts first (after `onAbort`). */
@@ -434,11 +553,11 @@ function untilAborted<T>(promise: Promise<T>, signal: AbortSignal, onAbort: () =
 }
 
 /** The account to name per app, for apps with several connected. */
-type AppAccounts = Partial<Record<ReadApp, string>>;
+type AppAccounts = Partial<Record<ConnectedApp, string>>;
 
 export interface ConnectedReadDeps {
   /** Null when connected apps are not set up here; else which of the read apps are connected. */
-  connected(): Promise<Partial<Record<ReadApp, boolean>> | null>;
+  connected(): Promise<Partial<Record<ConnectedApp, boolean>> | null>;
   /** The account to read for each app with several connected (Composio refuses a read that names none then); an app
    *  with one is left out, and its reads name no account. Asked once per session, with the bot the session reads for. */
   accounts?(botId?: string): Promise<AppAccounts>;
@@ -468,6 +587,15 @@ export interface ReadSession {
 export interface MailBodySession extends ReadSession {
   selectedCalendarEvents(input: { account?: string; calendarIds: readonly string[]; fromMs: number; toMs: number }): Promise<CalendarEvent[]>;
   calendarChoices(account?: string): Promise<Array<{ id: string; name: string; primary: boolean; color?: string }>>;
+  taskLists(account?: string): Promise<GoogleTaskList[]>;
+  tasksInList(input: { account?: string; listId: string }): Promise<GoogleTaskItem[]>;
+  allTasks(account?: string): Promise<Array<{ list: GoogleTaskList; items: GoogleTaskItem[] }>>;
+  completeTask(input: {
+    account?: string;
+    listId: string;
+    taskId: string;
+    status?: "completed" | "needsAction";
+  }): Promise<GoogleTaskPatchResult>;
   /** Null only when Gmail says the message is gone. */
   messageBody(messageId: string): Promise<string | null>;
   /** Outlook's inbox since `sinceMs`, newest first, at most `limit`, without bodies. */
@@ -478,7 +606,7 @@ export interface MailBodySession extends ReadSession {
 }
 
 export interface ConnectedReads {
-  connected(): Promise<Partial<Record<ReadApp, boolean>> | null>;
+  connected(): Promise<Partial<Record<ConnectedApp, boolean>> | null>;
   /** `botId`: the bot the reads are for, so an account limit of its own picks the account. */
   session(botId?: string): ReadSession;
 }
@@ -492,7 +620,7 @@ const GMAIL_PAGES = 6;
 /** The account lookup one multi-request read keeps for all its requests. */
 type AccountPin = { accounts?: Promise<AppAccounts> };
 
-const appOf = (slug: string): ReadApp => (slug.startsWith("GMAIL_") ? "gmail" : slug.startsWith("OUTLOOK_") ? "outlook" : "googlecalendar");
+const appOf = (slug: string): ConnectedApp => (slug.startsWith("GMAIL_") ? "gmail" : slug.startsWith("OUTLOOK_") ? "outlook" : slug.startsWith("GOOGLETASKS_") ? "googletasks" : "googlecalendar");
 
 export function createConnectedReads(deps: ConnectedReadDeps): Omit<ConnectedReads, "session"> & { session(botId?: string): MailBodySession } {
   const readTimeoutMs = deps.readTimeoutMs ?? READ_TIMEOUT_MS;
@@ -547,13 +675,18 @@ export function createConnectedReads(deps: ConnectedReadDeps): Omit<ConnectedRea
         if (error instanceof SourceError) throw error;
         if (gone && error instanceof ToolAnswerError && gone(error.message)) return GONE;
         if (shortened && error instanceof ShortenedAnswerError) return SHORTENED;
-        if (signal.aborted) throw new SourceError(app, `${slug} did not answer within ${Math.round(readTimeoutMs / 1000)} seconds`);
+        if (signal.aborted || (error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError"))) {
+          throw new SourceError(app, `${slug} did not answer within ${Math.round(readTimeoutMs / 1000)} seconds`, false, { timedOut: true, transport: true });
+        }
+        if (error instanceof ToolAnswerError) {
+          throw new SourceError(app, errorText(error), account !== undefined, { toolError: true });
+        }
         // Only the tool's own refusal points at the named account; a relay hiccup (HTTP 5xx) is a later try.
-        throw new SourceError(app, errorText(error), account !== undefined && error instanceof ToolAnswerError);
+        throw new SourceError(app, errorText(error), false, { transport: true });
       }
     }
 
-    function parsed<T>(app: ReadApp, parse: () => T): T {
+    function parsed<T>(app: ConnectedApp, parse: () => T): T {
       try {
         return parse();
       } catch (error) {
@@ -561,7 +694,7 @@ export function createConnectedReads(deps: ConnectedReadDeps): Omit<ConnectedRea
       }
     }
 
-    function requireFinite(app: ReadApp, ...times: number[]): void {
+    function requireFinite(app: ConnectedApp, ...times: number[]): void {
       if (times.some((time) => !Number.isFinite(time))) throw new SourceError(app, "the time window was not a finite time");
     }
 
@@ -606,7 +739,119 @@ export function createConnectedReads(deps: ConnectedReadDeps): Omit<ConnectedRea
       throw new SourceError("googlecalendar", `${CALENDAR_LIST_TOOL}: too many pages to read completely`);
     }
 
+    async function taskListPages(signal: AbortSignal, pin: AccountPin): Promise<GoogleTaskList[]> {
+      const results: GoogleTaskList[] = [];
+      const seen = new Set<string>();
+      let page: string | undefined;
+      for (let index = 0; index < TASKS_PAGES; index++) {
+        const pageArgs: Record<string, unknown> = { maxResults: 100, ...(page ? { pageToken: page } : {}) };
+        const data = await call(TASK_LISTS_TOOL, pageArgs, { signal, pin });
+        results.push(...parsed("googletasks", () => taskListsFromData(data)));
+        page = nextPageOf(data);
+        if (!page) return results;
+        if (seen.has(page)) throw new SourceError("googletasks", `${TASK_LISTS_TOOL}: repeated page token`);
+        seen.add(page);
+      }
+      throw new SourceError("googletasks", `${TASK_LISTS_TOOL}: too many pages to read completely`);
+    }
+
+    async function taskPages(listId: string, signal: AbortSignal, pin: AccountPin): Promise<GoogleTaskItem[]> {
+      const results: GoogleTaskItem[] = [];
+      const seen = new Set<string>();
+      let page: string | undefined;
+      let size = 100;
+      let includeAssigned = true;
+      for (let pages = 0; pages < TASKS_PAGES;) {
+        const args: Record<string, unknown> = {
+          tasklist_id: listId,
+          maxResults: size,
+          showCompleted: true,
+          showDeleted: false,
+          showHidden: true,
+          ...(includeAssigned ? { showAssigned: true } : {}),
+          ...(page ? { pageToken: page } : {}),
+        };
+        let data: unknown;
+        try {
+          data = await call(TASKS_LIST_TOOL, args, { signal, pin, shortened: size > GMAIL_PAGE_MIN });
+        } catch (error) {
+          if (
+            includeAssigned &&
+            error instanceof SourceError &&
+            error.toolError &&
+            /showAssigned/i.test(error.message) &&
+            /unexpected|extra|unknown|invalid|additional|not permitted/i.test(error.message)
+          ) {
+            includeAssigned = false;
+            continue;
+          }
+          throw error;
+        }
+        if (data === SHORTENED) {
+          size = Math.max(GMAIL_PAGE_MIN, Math.floor(size / 2));
+          continue;
+        }
+        results.push(...parsed("googletasks", () => tasksFromData(data, listId)));
+        pages++;
+        page = nextPageOf(data);
+        if (!page) return results;
+        if (seen.has(page)) throw new SourceError("googletasks", `${TASKS_LIST_TOOL}: repeated page token`);
+        seen.add(page);
+      }
+      throw new SourceError("googletasks", `${TASKS_LIST_TOOL}: too many pages to read completely`);
+    }
+
     return {
+      async taskLists(account) {
+        if (account !== undefined && !account.trim()) {
+          throw new SourceError("googletasks", "A valid account is required");
+        }
+        const signal = AbortSignal.timeout(readTimeoutMs);
+        const pin: AccountPin = { accounts: Promise.resolve(account ? { googletasks: account } : {}) };
+        return taskListPages(signal, pin);
+      },
+      async tasksInList({ account, listId }) {
+        if ((account !== undefined && !account.trim()) || !listId.trim()) {
+          throw new SourceError("googletasks", "A valid account and task list ID are required");
+        }
+        const signal = AbortSignal.timeout(readTimeoutMs);
+        const pin: AccountPin = { accounts: Promise.resolve(account ? { googletasks: account } : {}) };
+        return taskPages(listId, signal, pin);
+      },
+      async allTasks(account) {
+        if (account !== undefined && !account.trim()) {
+          throw new SourceError("googletasks", "A valid account is required");
+        }
+        const failed = new AbortController();
+        const signal = AbortSignal.any([AbortSignal.timeout(readTimeoutMs), failed.signal]);
+        const pin: AccountPin = { accounts: Promise.resolve(account ? { googletasks: account } : {}) };
+        const lists = await taskListPages(signal, pin);
+        return inParallel(lists, TASKS_READS_AT_ONCE, async (list) => {
+          try {
+            return { list, items: await taskPages(list.id, signal, pin) };
+          } catch (error) {
+            failed.abort();
+            throw error;
+          }
+        });
+      },
+      async completeTask({ account, listId, taskId, status = "completed" }) {
+        if ((account !== undefined && !account.trim()) || !listId.trim() || !taskId.trim()) {
+          throw new SourceError("googletasks", "A valid account, task list ID, and task ID are required");
+        }
+        const signal = AbortSignal.timeout(readTimeoutMs);
+        const pin: AccountPin = { accounts: Promise.resolve(account ? { googletasks: account } : {}) };
+        const data = await call(TASK_PATCH_TOOL, {
+          tasklist_id: listId,
+          task_id: taskId,
+          status,
+        }, { signal, pin });
+        const patched = parsed("googletasks", () => patchedTaskFromData(data, taskId));
+        if (patched.status !== status) {
+          throw new SourceError("googletasks", `Google Tasks did not confirm status ${status}`);
+        }
+        return patched;
+      },
       async calendarChoices(account) {
         const signal = AbortSignal.timeout(readTimeoutMs);
         const pin: AccountPin = { accounts: Promise.resolve(account ? { googlecalendar: account } : {}) };

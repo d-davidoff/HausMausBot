@@ -7441,5 +7441,7 @@
   "server.github.card.description": "Połącz z GitHubem, aby {bot} mógł wysyłać swoją pracę do Twoich repozytoriów.",
   "server.github.card.connectInApps": "Połącz z GitHubem przez tę kartę w aplikacji na komputerze albo w Aplikacjach.",
   "githubSignIn.title": "Logowanie do GitHuba",
-  "githubSignIn.tokenPlaceholder": "github_pat_…"
+  "githubSignIn.tokenPlaceholder": "github_pat_…",
+  "dashboard.tasks.title": "Moje zadania",
+  "dashboard.tasks.openGoogleTasks": "Otwórz Google Tasks"
 }

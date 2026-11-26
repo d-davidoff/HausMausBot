@@ -6240,5 +6240,7 @@
   "server.github.card.description": "{bot} işini depolarınıza gönderebilsin diye GitHub'ı bağlayın.",
   "server.github.card.connectInApps": "GitHub'ı bilgisayarınızdaki uygulamada bu karttan ya da Uygulamalar'dan bağlayın.",
   "githubSignIn.title": "GitHub oturumu",
-  "githubSignIn.tokenPlaceholder": "github_pat_…"
+  "githubSignIn.tokenPlaceholder": "github_pat_…",
+  "dashboard.tasks.title": "Görevlerim",
+  "dashboard.tasks.openGoogleTasks": "Google Tasks’ı aç"
 }
