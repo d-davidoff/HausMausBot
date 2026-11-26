@@ -10,6 +10,7 @@ import { HELP } from "../control-omb.ts";
 
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
 const DOCS = join(ROOT, "docs", "verification");
+const hasEnterprise = existsSync(join(ROOT, "enterprise", "server", "workspace-access.ts"));
 const recipes = readdirSync(DOCS).filter((name) => name.endsWith(".md")).sort();
 const text = (recipe: string) => readFileSync(join(DOCS, recipe), "utf8");
 // Paths inside external links belong to other repositories.
@@ -38,7 +39,7 @@ const featureRouteModules = ["data/routes.ts", "workspace-backup-http.ts", "clou
 const serverSource = [join(ROOT, "server", "index.ts"), ...routeModules, ...featureRouteModules]
   .map((file) => readFileSync(file, "utf8")).join("\n");
 const hooksSource = readFileSync(join(ROOT, "server", "webhook-ingress.ts"), "utf8");
-const hostedSource = readFileSync(join(ROOT, "enterprise", "server", "workspace-access.ts"), "utf8");
+const hostedSource = hasEnterprise ? readFileSync(join(ROOT, "enterprise", "server", "workspace-access.ts"), "utf8") : "";
 // Only constants named in the public handler's accepted-path guard are routes.
 // Outbound post("/api/handoff/...") calls belong to the identity service, not us.
 const hostedConstants = new Map([...hostedSource.matchAll(/const ([A-Z_]+) = "(\/api\/[^"\n]+)";/g)].map(match => [match[1]!, match[2]!]));
@@ -64,13 +65,13 @@ describe("docs/verification recipes cite things that exist", () => {
   it("cite source files that exist", () => {
     const refs = cited(/(?<![\w/.-])((?:scripts|server|src|shared|electron|companion|enterprise)\/[\w./-]+\.(?:ts|tsx|mjs|cjs|py))(?![\w/])/g);
     expect(refs.length).toBeGreaterThan(50);
-    expect([...new Set(refs.filter((hit) => !existsSync(join(ROOT, target(hit)))))]).toEqual([]);
+    expect([...new Set(refs.filter((hit) => !(target(hit).startsWith("enterprise/") && !hasEnterprise) && !existsSync(join(ROOT, target(hit)))))]).toEqual([]);
   });
 
   it("cite test files that exist", () => {
     const refs = cited(/(?<![\w/.-])([\w./-]+\.test\.(?:ts|mjs))(?![\w/])/g);
     expect(refs.length).toBeGreaterThan(20);
-    expect([...new Set(refs.filter((hit) => !existsSync(join(ROOT, target(hit)))))]).toEqual([]);
+    expect([...new Set(refs.filter((hit) => !(target(hit).startsWith("enterprise/") && !hasEnterprise) && !existsSync(join(ROOT, target(hit)))))]).toEqual([]);
   });
 
   it("cite API routes the server registers", () => {
@@ -88,10 +89,11 @@ describe("docs/verification recipes cite things that exist", () => {
       return source.includes(`"${prefix}`) || source.includes(`${prefix}/`)
         || routePatterns.some((pattern) => pattern.test(segments.map((segment) => PLACEHOLDER.test(segment) ? "x-1" : segment).join("/").replace(/^/, "/")));
     };
-    expect([...new Set(refs.filter((hit) => !registered(target(hit))))]).toEqual([]);
+    expect([...new Set(refs.filter((hit) => !(hit.startsWith("hosted-workspaces.md: /api/auth/hosted/") && !hasEnterprise) && !registered(target(hit))))]).toEqual([]);
   });
 
   it("distinguishes delegated public routes from external identity backchannels", () => {
+    if (!hasEnterprise) return;
     expect([...hostedPublicRoutes]).toEqual(["/api/auth/hosted/start", "/api/auth/hosted/callback"]);
     expect(hostedPublicRoutes.has("/api/handoff/consume")).toBe(false);
     expect(hostedPublicRoutes.has("/api/handoff/check")).toBe(false);
