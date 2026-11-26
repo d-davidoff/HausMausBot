@@ -121,7 +121,7 @@ describe("mascotBody", () => {
         "rocket, anaar, chakri, sparkler, bomb, laddu, chakli, jalebi, katli, karanji, " +
         "obj-controller, obj-barbell, obj-mug, obj-lightbulb, obj-chat, obj-sprout, obj-watering-can, obj-book, " +
         "obj-brain, obj-bull, obj-bunny, obj-camera, obj-cat, obj-cloud, obj-egg, obj-ghost, obj-magnifier, " +
-        "obj-paint-brush, obj-palette, obj-rocket, or obj-witch-hat",
+        "obj-paint-brush, obj-palette, obj-rocket, obj-witch-hat, or obj-hausmaus",
     });
   });
 });

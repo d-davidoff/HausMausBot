@@ -14,7 +14,7 @@ import { CursorAvatar, type CursorAvatarHandle } from "./CursorAvatar";
 import { ACTIVE_STATES } from "./mascot-motion";
 import { MOTION_FACE, useBeatState } from "./mascot-beat";
 import { avatarCropRadius, botAvatarProfile, clampAvatarFocus, clampAvatarZoom, mascotBodyColorSchema, mascotFaceInk, mascotMaterialSchema, type BotAvatarCrop, type MascotFaceColor, type MascotMaterial } from "../../shared/bot-avatar";
-import { MASCOT_BODIES, botMascotBody } from "../../shared/mascot-bodies";
+import { DEFAULT_MASCOT_BODY, MASCOT_BODIES, botMascotBody } from "../../shared/mascot-bodies";
 import { isCarvedBody, type BotBodyId } from "../../shared/bot-body";
 import { engineBody } from "../../shared/object-bodies";
 import { useFestivalDress, wornBody } from "@/lib/festival-dress";
@@ -115,7 +115,8 @@ function MausAvatarComponent(props: MausAvatarProps, ref: React.Ref<MausAvatarHa
       />
     );
   }
-  const definition = engineBody(bodyId);
+  const resolvedBodyId = bodyId === undefined || bodyId === DEFAULT_MASCOT_BODY ? "obj-hausmaus" : bodyId;
+  const definition = engineBody(resolvedBodyId) ?? engineBody("obj-hausmaus");
   if (definition) {
     return (
       <ObjectAvatar

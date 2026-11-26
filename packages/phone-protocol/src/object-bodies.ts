@@ -12,7 +12,7 @@ export const OBJECT_BODY_IDS = [
   "obj-controller", "obj-barbell", "obj-mug", "obj-lightbulb", "obj-chat", "obj-sprout",
   "obj-watering-can", "obj-book", "obj-brain", "obj-bull", "obj-bunny", "obj-camera",
   "obj-cat", "obj-cloud", "obj-egg", "obj-ghost", "obj-magnifier", "obj-paint-brush",
-  "obj-palette", "obj-rocket", "obj-witch-hat",
+  "obj-palette", "obj-rocket", "obj-witch-hat", "obj-hausmaus",
 ] as const;
 
 export type ObjectBodyId = (typeof OBJECT_BODY_IDS)[number];
@@ -129,6 +129,13 @@ const GALLERY: AvatarDefinition[] = [
     name: "Witch Hat",
     body: { path: "M50 72C72 72 92 75 92 80C92 85 72 87 50 87C28 87 8 85 8 80C8 75 28 72 50 72ZM37 30L63 30Q68 30 68.8 35L77.5 76Q78 80 74 80L26 80Q22 80 22.5 76L31.2 35Q32 30 37 30ZM30.56 38C33 26.5 40 18 52 14C62 10.5 72 9 81 11A3.2 3.2 0 0 1 81 17.4C74 18 69.5 24.5 68.1 31.5L69.44 38Z" },
     eyes: { x: 50, y: 54, spacing: 15, scale: 1.05 },
+  },
+  {
+    version: 1,
+    id: "hausmaus",
+    name: "Maus",
+    body: { path: "M67 72C74 77 82 74 83 66C84 61 80 58 83 55C87 51 92 57 92 65C93 78 83 87 69 84L63 79ZM38 56C29 57 27 67 28 77C29 85 36 89 49 89C62 89 71 85 72 77C73 67 70 57 61 56ZM27 12C36 12 43 19 43 28C43 38 36 45 27 45C17 45 10 38 10 28C10 19 17 12 27 12ZM73 12C83 12 90 19 90 28C90 38 83 45 73 45C64 45 57 38 57 28C57 19 64 12 73 12ZM50 28C69 28 80 38 81 51C82 63 72 70 50 70C28 70 18 63 19 51C20 38 31 28 50 28Z" },
+    eyes: { x: 50, y: 47, spacing: 17, scale: 1.1 },
   },
 ];
 
