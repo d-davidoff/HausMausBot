@@ -26,6 +26,11 @@ afterEach(() => {
   globalThis.fetch = nativeFetch;
   fixture.connected = true;
   document.body.innerHTML = "";
+  try {
+    sessionStorage.clear();
+  } catch {
+    // ignore
+  }
 });
 
 it("routes reads and saves through serverFetch (RelayLink), recovers from save failures without locking settings, and refreshes on visibility", async () => {
@@ -119,5 +124,48 @@ it("renders no agenda loading placeholders and makes no network requests while C
   expect(container.querySelector('[aria-label="Loading calendars"]')).toBeNull();
   expect(container.querySelector('[aria-label="Loading agenda"]')).toBeNull();
   expect(fetchSpy).not.toHaveBeenCalled();
+  await act(async () => { root.unmount(); });
+});
+
+it("renders cached agenda events instantly via stale-while-revalidate before background revalidation finishes", async () => {
+  sessionStorage.setItem("openmausbot.dashboard.agenda", JSON.stringify({
+    calendars: [{ id: "primary", name: "Personal", primary: true, color: "#1a73e8" }],
+    selectedCalendarIds: ["primary"],
+    days: [{ date: "2026-11-26", events: [
+      { id: "primary:ev-cached", calendarId: "primary", title: "Instant cached class", start: "2026-11-26T10:00:00Z", end: "2026-11-26T11:00:00Z", allDay: false, color: "#1a73e8" },
+    ] }],
+    updatedAt: "2026-11-26T09:00:00.000Z",
+  }));
+
+  let resolveFetch: ((res: Response) => void) | undefined;
+  setRelayLink({
+    close: () => undefined,
+    fetch: () => new Promise<Response>((resolve) => {
+      resolveFetch = resolve;
+    }),
+  });
+
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+
+  // Mount with pending network fetch
+  await act(async () => {
+    root.render(createElement(CalendarAgenda));
+  });
+
+  // Cached event is rendered instantly without waiting for network or showing loading skeleton
+  expect(container.textContent).toContain("Instant cached class");
+  expect(container.querySelector('[aria-label="Loading agenda"]')).toBeNull();
+
+  // Background fetch resolves with fresh event
+  await act(async () => {
+    resolveFetch?.(jsonResponse([{ date: "2026-11-26", events: [
+      { id: "primary:ev-fresh", calendarId: "primary", title: "Fresh revalidated class", start: "2026-11-26T10:00:00Z", end: "2026-11-26T11:00:00Z", allDay: false, color: "#1a73e8" },
+    ] }]));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  });
+
+  expect(container.textContent).toContain("Fresh revalidated class");
   await act(async () => { root.unmount(); });
 });

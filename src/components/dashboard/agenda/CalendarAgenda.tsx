@@ -11,6 +11,37 @@ import { AgendaHeader } from "./AgendaHeader";
 import { CalendarConfig } from "../calendar/CalendarConfig";
 
 const REFRESH_MS = 5 * 60 * 1000;
+const AGENDA_STORAGE_KEY = "openmausbot.dashboard.agenda";
+
+interface CachedAgendaState {
+  calendars: DashboardCalendarChoice[];
+  selectedCalendarIds: string[];
+  days: DashboardAgendaDay[];
+  updatedAt: string;
+}
+
+function loadCachedAgenda(): CachedAgendaState | null {
+  try {
+    const raw = sessionStorage.getItem(AGENDA_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (parsed && Array.isArray(parsed.calendars) && Array.isArray(parsed.days)) {
+      return parsed;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function saveCachedAgenda(data: Partial<CachedAgendaState>): void {
+  try {
+    const existing = loadCachedAgenda() ?? { calendars: [], selectedCalendarIds: [], days: [], updatedAt: "" };
+    sessionStorage.setItem(AGENDA_STORAGE_KEY, JSON.stringify({ ...existing, ...data }));
+  } catch {
+    // Ignore storage quota or disabled errors
+  }
+}
 
 function connectedNow(): boolean | null {
   const inventory = connectorStatusMemory();
@@ -34,19 +65,20 @@ async function saveCalendarSelection(calendarIds: readonly string[]): Promise<vo
 export function CalendarAgenda() {
   const configId = useId();
   const pluginsOpen = useStoreSelector((state) => state.pluginsOpen);
+  const initialCache = loadCachedAgenda();
   const [connected, setConnected] = useState(connectedNow);
-  const [calendars, setCalendars] = useState<DashboardCalendarChoice[] | null>(null);
-  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [calendars, setCalendars] = useState<DashboardCalendarChoice[] | null>(() => initialCache?.calendars ?? null);
+  const [selectedIds, setSelectedIds] = useState<string[]>(() => initialCache?.selectedCalendarIds ?? []);
   const [configOpen, setConfigOpen] = useState(false);
-  const [days, setDays] = useState<DashboardAgendaDay[]>([]);
-  const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [days, setDays] = useState<DashboardAgendaDay[]>(() => initialCache?.days ?? []);
+  const [updatedAt, setUpdatedAt] = useState<Date | null>(() => (initialCache?.updatedAt ? new Date(initialCache.updatedAt) : null));
+  const [loading, setLoading] = useState(() => initialCache === null || (initialCache.days.length === 0 && initialCache.selectedCalendarIds.length > 0));
   const [error, setError] = useState(false);
   const [selectionError, setSelectionError] = useState(false);
   const [selectionSaving, setSelectionSaving] = useState(false);
   const [reload, setReload] = useState(0);
-  const selectedIdsRef = useRef<string[]>([]);
-  const loadedKeyRef = useRef("");
+  const selectedIdsRef = useRef<string[]>(initialCache?.selectedCalendarIds ?? []);
+  const loadedKeyRef = useRef((initialCache?.selectedCalendarIds ?? []).join("\u0000"));
   const selectionQueue = useRef(Promise.resolve());
   const selectionRevision = useRef(0);
   const selectedKey = selectedIds.join("\u0000");
@@ -63,6 +95,9 @@ export function CalendarAgenda() {
         setSelectedIds([]);
         setConfigOpen(false);
         setCalendars(null);
+        setDays([]);
+        setUpdatedAt(null);
+        try { sessionStorage.removeItem(AGENDA_STORAGE_KEY); } catch {}
       }
     });
     return () => { current = false; };
@@ -77,6 +112,7 @@ export function CalendarAgenda() {
         loadedKeyRef.current = "";
         setDays([]);
         setUpdatedAt(null);
+        saveCachedAgenda({ days: [], updatedAt: "" });
       }
       return;
     }
@@ -88,7 +124,7 @@ export function CalendarAgenda() {
     const loadCalendars = () => {
       const controller = new AbortController();
       inFlight = controller;
-      setLoading(true);
+      if (!initialCache) setLoading(true);
       setError(false);
       void getCalendarData<{ calendars: DashboardCalendarChoice[]; selectedCalendarIds: string[] }>(undefined, { signal: controller.signal })
         .then((calendarList) => {
@@ -97,6 +133,10 @@ export function CalendarAgenda() {
           selectedIdsRef.current = calendarList.selectedCalendarIds;
           setSelectedIds(calendarList.selectedCalendarIds);
           setConfigOpen(calendarList.selectedCalendarIds.length === 0);
+          saveCachedAgenda({
+            calendars: calendarList.calendars,
+            selectedCalendarIds: calendarList.selectedCalendarIds,
+          });
         })
         .catch(() => { if (current) setError(true); })
         .finally(() => {
@@ -110,7 +150,7 @@ export function CalendarAgenda() {
       clearTimeout(timer);
       const controller = new AbortController();
       inFlight = controller;
-      if (!background) {
+      if (!background && days.length === 0) {
         setLoading(true);
         setError(false);
       }
@@ -119,8 +159,10 @@ export function CalendarAgenda() {
           if (!current) return;
           loadedKeyRef.current = selectedKey;
           setDays(result);
-          setUpdatedAt(new Date());
+          const now = new Date();
+          setUpdatedAt(now);
           setError(false);
+          saveCachedAgenda({ days: result, updatedAt: now.toISOString() });
         })
         .catch(() => {
           if (current && !background) setError(true);
@@ -169,7 +211,10 @@ export function CalendarAgenda() {
     selectionQueue.current = selectionQueue.current.catch(() => undefined).then(async () => {
       try {
         await saveCalendarSelection(next);
-        if (revision === selectionRevision.current) setSelectionError(false);
+        if (revision === selectionRevision.current) {
+          setSelectionError(false);
+          saveCachedAgenda({ selectedCalendarIds: [...next] });
+        }
       } catch {
         if (revision === selectionRevision.current) setSelectionError(true);
       } finally {

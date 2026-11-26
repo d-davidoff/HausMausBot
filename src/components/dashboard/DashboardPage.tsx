@@ -1,6 +1,7 @@
 import { DateTimeDisplay } from "./clock/DateTimeDisplay";
 import { GoogleCalendarConnection } from "./calendar/GoogleCalendarConnection";
 import { CalendarAgenda } from "./agenda/CalendarAgenda";
+import { CountdownList } from "./countdown/CountdownList";
 
 const line = "h-2.5 rounded-full bg-ink/[0.1]";
 
@@ -32,13 +33,8 @@ export default function DashboardPage() {
         </div>
       </aside>
 
-      <div className="col-start-1 row-start-5 grid w-full min-w-0 grid-cols-2 gap-3 md:col-start-2 md:col-span-2 md:row-start-3 md:grid-cols-4">
-        {[0, 1, 2, 3].map((item) => (
-          <div key={item} aria-hidden="true" className="flex min-h-20 flex-col justify-center gap-3 rounded-xl border border-hairline bg-card px-4 py-3">
-            <div className={`${line} w-3/4`} />
-            <div className={`${line} w-1/2 bg-ink/[0.07]`} />
-          </div>
-        ))}
+      <div className="col-start-1 row-start-5 w-full min-w-0 md:col-start-2 md:col-span-2 md:row-start-3">
+        <CountdownList />
       </div>
     </div>
   );
