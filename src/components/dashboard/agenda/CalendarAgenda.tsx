@@ -244,7 +244,7 @@ export function CalendarAgenda() {
         <Settings aria-hidden="true" size={16} className="shrink-0" />
       </button>
     </header>
-    {loading && <div aria-label={calendars === null ? "Loading calendars" : "Loading agenda"} className="flex flex-col gap-3">{[0, 1, 2, 3, 4].map((n) => <div key={n} className="h-8 animate-pulse rounded-lg bg-ink/[0.07] motion-reduce:animate-none" />)}</div>}
+    {loading && <div aria-label={calendars === null ? "Loading calendars" : "Loading agenda"} className="flex w-full flex-col gap-3 md:w-56 md:max-w-full">{[0, 1, 2, 3, 4].map((n) => <div key={n} className="h-8 animate-pulse rounded-lg bg-ink/[0.07] motion-reduce:animate-none" />)}</div>}
     {error && <div role="alert" className="text-sm text-ink-secondary">{calendars === null ? "Couldn’t load calendars." : "Couldn’t load calendar events."} <button type="button" className="underline" onClick={retry}>Try again</button></div>}
     {!loading && !error && configOpen && calendars && <CalendarConfig
       id={configId}

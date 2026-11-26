@@ -511,7 +511,7 @@ export function TodayTasks() {
         <h2 className="ms-auto min-w-0 truncate text-xl font-semibold tracking-[-0.01em] text-ink">
           <button
             type="button"
-            className="inline-flex items-center gap-2 rounded-sm outline-offset-4 hover:underline focus-visible:outline-2"
+            className="inline-flex max-w-full items-center gap-2 rounded-sm outline-offset-4 hover:underline focus-visible:outline-2"
             onClick={openGoogleTasks}
           >
             <span className="truncate">{t("dashboard.tasks.title")}</span>
