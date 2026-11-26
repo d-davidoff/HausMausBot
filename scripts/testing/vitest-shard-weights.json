@@ -5,7 +5,6 @@
     "companion/test/mdns.test.ts": 6,
     "companion/test/proxy.test.ts": 7,
     "electron/cua-launch.test.mjs": 11,
-    "enterprise/server/workspace-access.test.ts": 6,
     "evals/evals.test.ts": 72,
     "evals/runners/run-skill-bench.test.ts": 21,
     "scripts/ci-scope.test.ts": 14,
@@ -146,7 +145,6 @@
   "linux": {
     "companion/test/mdns.test.ts": 5,
     "companion/test/proxy.test.ts": 6,
-    "enterprise/server/workspace-access.test.ts": 5,
     "evals/evals.test.ts": 74,
     "evals/runners/run-skill-bench.test.ts": 20,
     "scripts/mascot-bodies/carved-bodies.test.mjs": 8,
@@ -505,7 +503,6 @@
   "win32": {
     "companion/test/mdns.test.ts": 5,
     "companion/test/proxy.test.ts": 7,
-    "enterprise/server/workspace-access.test.ts": 7,
     "evals/evals.test.ts": 81,
     "evals/golden/golden.test.ts": 5,
     "evals/runners/run-skill-bench.test.ts": 25,

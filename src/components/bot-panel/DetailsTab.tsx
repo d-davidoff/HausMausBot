@@ -11,7 +11,7 @@ import { BotConversations } from "./Conversations";
 import { BotKeeps } from "./Keeps";
 import type { SimplePageId } from "./page-registry";
 import { TryAsking } from "./TryAsking";
-import { CardLabel, RowIcon, rowCls, RowText } from "./rows";
+import { CardLabel, RowIcon, rowCls, RowText, NavRow } from "./rows";
 import { useStoreSelector } from "@/state/store-select";
 import { newChatBot } from "@/state/new-chat";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
@@ -106,34 +106,6 @@ export function DetailsTab({ bot, derived, onOpen }: {
         <CardLabel>{t("botPanel.uiInterface")}</CardLabel>
         <NavRow icon={PanelsTopLeft} title={t("botPanel.uiInterface")} data-panel-page="ui-interface" onClick={() => onOpen("ui-interface")} />
       </section>
-
-      {derived.botRoutines.length === 0 ? (
-        <section data-panel-empty="routines">
-          <CardLabel action={<LabelAction data-panel-automations="" onClick={() => dispatch({ type: "showRoutines", view: "list" })}>{t("sidebar.nav.automations")}</LabelAction>}>
-            {t("botSettings.simple.routines")}
-          </CardLabel>
-          <button
-            type="button"
-            data-panel-page="routines"
-            title={t("botPanel.routines.emptyHint")}
-            onClick={() => onOpen("routines")}
-            className={cn(panelActionCls, "w-full")}
-          >
-            <CalendarPlus size={15} aria-hidden="true" className="shrink-0 text-ink-secondary" />
-            <span className="truncate">{t("botPanel.routines.add")}</span>
-          </button>
-        </section>
-      ) : (
-        <Card label={t("botSettings.simple.routines")} anchor="routines">
-          <NavRow
-            data-panel-page="routines"
-            icon={Calendar}
-            title={t("botSettings.simple.routines")}
-            value={routinesOn > 0 ? t("botPanel.routinesOn", { count: routinesOn }) : t("botPanel.none")}
-            onClick={() => onOpen("routines")}
-          />
-        </Card>
-      )}
     </div>
   );
 }
