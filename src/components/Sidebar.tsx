@@ -672,7 +672,7 @@ export function botRowProps<State extends Pick<AppState, "activeView" | "selecte
   bot: Bot,
   layout: Pick<BotRowProps, "density" | "query" | "onMenu" | "renameRequest" | "botDrag" | "botDrop" | "botDragging" | "placeHere">,
 ): BotRowProps {
-  const selected = state.activeView === "chat" && state.selectedId === bot.id;
+  const selected = (state.activeView === "chat" || state.activeView === "ui-interface") && state.selectedId === bot.id;
   const reveal = state.revealThread;
   return {
     ...layout,

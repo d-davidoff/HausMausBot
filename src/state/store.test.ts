@@ -15,6 +15,7 @@ import {
   liveCallFromFrame,
   loadSnapshotBoundary,
   openBot,
+  openBotRow,
   openThread,
   persistBotUpdate,
   persistTaskApproval,
@@ -37,6 +38,7 @@ import {
 import { LAST_CONVERSATION_KEY } from "@/lib/last-conversation";
 import { cacheDesktopCapabilities, desktopCapabilitiesNow } from "@/lib/desktop";
 import { LAST_BOT_SECTION_KEY } from "@/lib/last-bot-section";
+import { BOT_VIEWS_KEY } from "@/lib/bot-views";
 import { NOTIFICATION_TRAY_PINNED_KEY } from "@/lib/notification-preferences";
 import { transcriptLookups } from "@/lib/transcript-derivations";
 import { openLiveEvents, type LiveEventSourceLike, type LiveEventsPlatform } from "../lib/live-events";
@@ -165,6 +167,106 @@ describe("independent bot threads", () => {
     const disabled = reducer(page, { type: "botPatched", bot: { ...bot, uiInterfaceLayout: undefined } });
     expect(disabled.activeView).toBe("chat");
     expect(disabled.bots[0]?.threadId).toBe(bot.threadId);
+  });
+
+  it("remembers each bot's chat vs UI view across bot switches and app pages", () => {
+    const botA: Bot = { ...bot, id: "bot-a", uiInterfaceLayout: "dashboard", unread: true, tasks: [{ threadId: "first", title: "First", createdAt: 1, unread: true }] };
+    const botB: Bot = { ...bot, id: "bot-b", threadId: "b-first", uiInterfaceLayout: undefined };
+    const botC: Bot = { ...bot, id: "bot-c", threadId: "c-first", uiInterfaceLayout: "cheat-sheet" };
+    let state: AppState = { ...initialState, bots: [botA, botB, botC], selectedId: botA.id, activeView: "chat" };
+
+    state = reducer(state, { type: "showBotInterface", botId: botA.id });
+    expect(state.activeView).toBe("ui-interface");
+
+    state = reducer(state, { type: "select", id: botB.id });
+    expect(state).toMatchObject({ selectedId: botB.id, activeView: "chat" });
+
+    state = reducer(state, { type: "select", id: botC.id });
+    expect(state).toMatchObject({ selectedId: botC.id, activeView: "chat" });
+
+    state = reducer(state, { type: "select", id: botA.id });
+    expect(state).toMatchObject({ selectedId: botA.id, activeView: "ui-interface" });
+    expect(state.bots.find((b) => b.id === botA.id)?.unread).toBe(true);
+
+    state = reducer(state, { type: "showRoutines" });
+    expect(state.activeView).toBe("routines");
+    state = reducer(state, { type: "select", id: botA.id });
+    expect(state.activeView).toBe("ui-interface");
+
+    state = reducer(state, { type: "showAnnouncements" });
+    state = reducer(state, { type: "showChat" });
+    expect(state.activeView).toBe("chat");
+    state = reducer(state, { type: "select", id: botA.id });
+    expect(state.activeView).toBe("ui-interface");
+
+    state = reducer(state, { type: "showChat" });
+    expect(state.activeView).toBe("chat");
+    state = reducer(state, { type: "select", id: botB.id });
+    state = reducer(state, { type: "select", id: botA.id });
+    expect(state.activeView).toBe("chat");
+
+    state = reducer(state, { type: "showBotInterface", botId: botA.id });
+    state = reducer(state, { type: "select", id: botB.id });
+    state = reducer(state, { type: "updateBot", botId: botA.id, patch: { uiInterfaceLayout: null } });
+    state = reducer(state, { type: "select", id: botA.id });
+    expect(state.activeView).toBe("chat");
+  });
+
+  it("keeps a bot's remembered UI view when openBot switches to its main thread, while openThread opens chat", () => {
+    const uiBot: Bot = {
+      ...bot,
+      id: "ui-bot",
+      threadId: "other",
+      mainThreadId: "first",
+      uiInterfaceLayout: "dashboard",
+      tasks: [
+        { threadId: "first", title: "Main", createdAt: 1 },
+        { threadId: "other", title: "Other", createdAt: 2 },
+      ],
+    };
+    let state: AppState = { ...initialState, bots: [uiBot, { ...bot, id: "b2" }], selectedId: uiBot.id };
+    state = reducer(state, { type: "showBotInterface", botId: uiBot.id });
+    state = reducer(state, { type: "select", id: "b2" });
+
+    const openedActions: Action[] = [];
+    openBot((action) => openedActions.push(action), uiBot, false);
+    state = openedActions.reduce(reducer, state);
+    expect(state).toMatchObject({ selectedId: uiBot.id, activeView: "ui-interface" });
+
+    const threadActions: Action[] = [];
+    openThread((action) => threadActions.push(action), { botId: uiBot.id, threadId: "other" }, { bots: [uiBot], groups: [] }, false);
+    state = threadActions.reduce(reducer, state);
+    expect(state).toMatchObject({ selectedId: uiBot.id, activeView: "chat" });
+  });
+
+  it("preserves UI view when clicking a bot row with a marked non-home thread, and opens chat if the bot was left in chat", () => {
+    const markedBot: Bot = {
+      ...bot,
+      id: "marked-bot",
+      threadId: "first",
+      mainThreadId: "first",
+      uiInterfaceLayout: "dashboard",
+      tasks: [
+        { threadId: "first", title: "Main", createdAt: 1 },
+        { threadId: "other", title: "Other", createdAt: 2, unread: true },
+      ],
+    };
+    let state: AppState = { ...initialState, bots: [markedBot, { ...bot, id: "b2" }], selectedId: markedBot.id };
+    state = reducer(state, { type: "showBotInterface", botId: markedBot.id });
+    state = reducer(state, { type: "select", id: "b2" });
+
+    const rowActions: Action[] = [];
+    openBotRow((action) => rowActions.push(action), markedBot, false, false);
+    state = rowActions.reduce(reducer, state);
+    expect(state).toMatchObject({ selectedId: markedBot.id, activeView: "ui-interface" });
+    expect(state.botViews[markedBot.id]).toBe("ui-interface");
+
+    state = reducer(state, { type: "showChat" });
+    state = reducer(state, { type: "select", id: "b2" });
+    const chatRowActions: Action[] = [];
+    openBotRow((action) => chatRowActions.push(action), markedBot, false, false);
+    state = chatRowActions.reduce(reducer, state);
+    expect(state).toMatchObject({ selectedId: markedBot.id, activeView: "chat" });
   });
 
   it("keeps the profile aggregate while projecting the selected thread's model, permissions and idle composer", () => {
@@ -3225,6 +3327,70 @@ describe("restoring the open conversation", () => {
       await settle();
       expect(seen.selectedId).toBe("room-1");
       expect(stored.get(LAST_CONVERSATION_KEY)).toBe("room-1");
+    });
+
+    it("the provider remembers and restores each bot's UI view across bot switches and reloads", async () => {
+      const { stored, stream } = await boot({
+        [LAST_CONVERSATION_KEY]: "bot-1",
+        [BOT_VIEWS_KEY]: JSON.stringify({ "bot-1": "ui-interface" }),
+      });
+      const uiFirst = { ...first, uiInterfaceLayout: "dashboard" as const };
+      vi.stubGlobal("fetch", (path: string) =>
+        Promise.resolve(new Response(JSON.stringify(
+          path.startsWith("/api/bots?") ? { bots: [uiFirst, second], groups: [room] } : {},
+        ))),
+      );
+      stream.send(hello());
+      await settle();
+      expect(seen.selectedId).toBe("bot-1");
+      expect(seen.activeView).toBe("ui-interface");
+
+      flushSync(() => dispatch({ type: "select", id: "bot-2" }));
+      await settle();
+      expect(seen.selectedId).toBe("bot-2");
+      expect(seen.activeView).toBe("chat");
+      expect(JSON.parse(stored.get(BOT_VIEWS_KEY) ?? "{}")).toEqual({ "bot-1": "ui-interface" });
+
+      flushSync(() => dispatch({ type: "select", id: "bot-1" }));
+      await settle();
+      expect(seen.selectedId).toBe("bot-1");
+      expect(seen.activeView).toBe("ui-interface");
+
+      flushSync(() => dispatch({ type: "showChat" }));
+      await settle();
+      expect(seen.activeView).toBe("chat");
+      expect(JSON.parse(stored.get(BOT_VIEWS_KEY) ?? "{}")).toEqual({});
+    });
+
+    it("sends seen=0 when a view-preserving switchTask restores UI view instead of chat", async () => {
+      const { stream } = await boot({
+        [LAST_CONVERSATION_KEY]: "bot-2",
+        [BOT_VIEWS_KEY]: JSON.stringify({ "bot-1": "ui-interface" }),
+      });
+      const uiFirst: Bot = {
+        ...first,
+        uiInterfaceLayout: "dashboard",
+        tasks: [
+          { threadId: "bot-1-thread", title: "Main", createdAt: 1 },
+          { threadId: "unread-thread", title: "Unread", createdAt: 2, unread: true },
+        ],
+      };
+      const calls: string[] = [];
+      vi.stubGlobal("fetch", (path: string, init?: RequestInit) => {
+        if (init?.method === "POST") calls.push(path);
+        return Promise.resolve(new Response(JSON.stringify(
+          path.startsWith("/api/bots?") ? { bots: [uiFirst, second], groups: [room] } : { bot: { ...uiFirst, threadId: "unread-thread" } },
+        )));
+      });
+      stream.send(hello());
+      await settle();
+      expect(seen.selectedId).toBe("bot-2");
+
+      flushSync(() => openBotRow(dispatch, uiFirst, false, false));
+      await settle();
+      expect(seen.selectedId).toBe("bot-1");
+      expect(seen.activeView).toBe("ui-interface");
+      expect(calls).toEqual(["/api/bots/bot-1/tasks/unread-thread?messages=80&seen=0"]);
     });
 
     it("the provider restores the notification tray pin remembered on this device (email 1a1a4fb0)", async () => {

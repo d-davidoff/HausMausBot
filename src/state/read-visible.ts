@@ -52,8 +52,15 @@ function shownBotThread(state: AppState): string | undefined {
   return bot?.switchingTo ?? bot?.threadId;
 }
 
+function opensUiInterface(action: Action, state: AppState): boolean {
+  const botId = action.type === "select" ? action.id : action.type === "switchTask" && action.preserveView ? action.botId : undefined;
+  if (!botId || state.botViews?.[botId] !== "ui-interface") return false;
+  return Boolean(state.bots.find((candidate) => candidate.id === botId)?.uiInterfaceLayout);
+}
+
 /** The conversation an action puts on screen or writes in, which the person chose; never one merely shown beside it. */
 function openedBotThread(action: Action, state: AppState): string | undefined {
+  if (opensUiInterface(action, state)) return undefined;
   if ((action.type === "switchTask" || action.type === "send") && action.threadId) return action.threadId;
   const botId = action.type === "select" ? action.id : action.type === "openDataResult" || action.type === "send" ? action.botId : undefined;
   const bot = botId === undefined ? undefined : state.bots.find((candidate) => candidate.id === botId);

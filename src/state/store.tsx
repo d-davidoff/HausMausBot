@@ -60,6 +60,7 @@ import { answerResponse, dismissResponse } from "@/lib/card-answer";
 import { forgetLiveTurns, noteRuntimeTurn, sendStop } from "@/lib/stop-turn";
 import { readLastConversation, rememberConversation } from "@/lib/last-conversation";
 import { readLastBotSection, rememberBotSection } from "@/lib/last-bot-section";
+import { rememberBotViews, withRememberedBotViews, type BotViews } from "@/lib/bot-views";
 import { showNotification } from "@/lib/notify";
 import { randomUuid } from "@/lib/random-uuid";
 import { useShowThreads } from "@/lib/thread-preferences";
@@ -512,6 +513,7 @@ export interface AppState {
   liveCallLookupSeq: number;
   selectedId: string;
   activeView: "chat" | "ui-interface" | "team-map" | "routines" | "files" | "web-panel" | "published-apps" | "team-files" | "announcements" | "skill-burgers";
+  botViews: BotViews;
   /** Folders a finished move left on this computer, for Files to offer sharing. */
   filesSuggest: string[] | null; webPanelId?: string;
   routines: Routine[]; routineRunLimits?: RoutineRunLimits;
@@ -698,7 +700,7 @@ export type Action =
       onError?: (message: string) => void;
     }
   | { type: "newTask"; botId: string; projectId?: string; cwd?: string; onCreated?: () => void; onError?: (message: string) => void; blankChat?: number }
-  | { type: "switchTask"; botId: string; threadId: string; whole?: true; auto?: true }
+  | { type: "switchTask"; botId: string; threadId: string; whole?: true; auto?: true; preserveView?: true }
   | { type: "switchTaskFailed"; botId: string; threadId: string }
   | { type: "taskSwitched"; bot: Bot }
   | { type: "renameTask"; botId: string; threadId: string; title: string }
@@ -861,14 +863,39 @@ function dismissOnboardingCard(state: AppState, botId: string): AppState {
 
 export const CLOUD_LINK_SETTINGS = { type: "toggleAppSettings", open: true, section: "cloudAccount", cloudLink: true } as const satisfies Action;
 
+function withBotView(botViews: AppState["botViews"], botId: string, view: "chat" | "ui-interface"): AppState["botViews"] {
+  if (view === "ui-interface") {
+    return botViews[botId] === "ui-interface" ? botViews : { ...botViews, [botId]: "ui-interface" };
+  }
+  if (!(botId in botViews)) return botViews;
+  const { [botId]: _cleared, ...rest } = botViews;
+  return rest;
+}
+
+function botViewFor(
+  state: Pick<AppState, "botViews">,
+  botId: string,
+  bot: Pick<Bot, "uiInterfaceLayout"> | undefined,
+): "chat" | "ui-interface" {
+  return bot?.uiInterfaceLayout && state.botViews[botId] === "ui-interface" ? "ui-interface" : "chat";
+}
+
 export function reducer(state: AppState, action: Action): AppState {
   if (olderThanHeld(state, action)) return state;
   const next = capHeldInBackground(reduceApp(state, action), action);
-  if (next.activeView === "ui-interface" && (next.selectedId !== state.selectedId ||
-    !next.bots.some((bot) => bot.id === next.selectedId && bot.uiInterfaceLayout))) {
-    return { ...next, activeView: "chat" };
+  let botViews = next.botViews;
+  for (const bot of next.bots) {
+    if (!bot.uiInterfaceLayout && botViews[bot.id] === "ui-interface") {
+      botViews = withBotView(botViews, bot.id, "chat");
+    }
   }
-  return next;
+  const activeView = next.activeView === "ui-interface" &&
+    !next.bots.some((bot) => bot.id === next.selectedId && bot.uiInterfaceLayout)
+    ? "chat"
+    : next.activeView;
+  return botViews === next.botViews && activeView === next.activeView
+    ? next
+    : { ...next, activeView, botViews };
 }
 function reduceApp(state: AppState, action: Action): AppState {
   const [newChatState, newChatOnly] = reduceNewChat(state, action); if (newChatOnly) return newChatState; state = newChatState;
@@ -887,6 +914,17 @@ function reduceApp(state: AppState, action: Action): AppState {
   switch (action.type) {
     case "hydrate": {
       const selectedId = hydratedSelectedId(state.selectedId, action.bots, action.groups, action.resumeId);
+      const botViews = action.bots.length > 0
+        ? Object.fromEntries(
+          Object.entries(state.botViews).filter(([botId, view]) =>
+            view === "ui-interface" && action.bots.some((bot) => bot.id === botId && bot.uiInterfaceLayout),
+          ),
+        ) as AppState["botViews"]
+        : state.botViews;
+      const selectedBot = action.bots.find((bot) => bot.id === selectedId);
+      const activeView = !state.hydrated && state.activeView === "chat"
+        ? botViewFor({ botViews }, selectedId, selectedBot)
+        : state.activeView;
       const hydrated = {
         ...state,
         bots: action.bots.map((sent) => {
@@ -905,6 +943,8 @@ function reduceApp(state: AppState, action: Action): AppState {
         sections: action.sections ?? [],
         computerControl: action.computerControl,
         selectedId,
+        activeView,
+        botViews,
         hydrated: true as const,
         backgroundThreadEvents: {},
         loadingOlder: {},
@@ -952,9 +992,24 @@ function reduceApp(state: AppState, action: Action): AppState {
       };
     case "showBotInterface":
       if (state.selectedId !== action.botId || !state.bots.find((bot) => bot.id === action.botId)?.uiInterfaceLayout) return state;
-      return { ...state, activeView: "ui-interface", settingsOpen: false, computerOpen: false, inspectorOpen: false, activityOpen: false, forkPanel: null };
-    case "showChat":
-      return state.activeView === "chat" ? state : { ...state, activeView: "chat" };
+      return {
+        ...state,
+        activeView: "ui-interface",
+        botViews: withBotView(state.botViews, action.botId, "ui-interface"),
+        settingsOpen: false,
+        computerOpen: false,
+        inspectorOpen: false,
+        activityOpen: false,
+        forkPanel: null,
+      };
+    case "showChat": {
+      const botViews = state.activeView === "ui-interface" && state.bots.some((bot) => bot.id === state.selectedId)
+        ? withBotView(state.botViews, state.selectedId, "chat")
+        : state.botViews;
+      return state.activeView === "chat" && botViews === state.botViews
+        ? state
+        : { ...state, activeView: "chat", botViews };
+    }
     case "forkMessage": case "openForkPanel": case "forkPanelLoaded": case "forkPanelLoadFailed":
     case "forkPanelMessage": case "forkPanelActive": case "closeForkPanel":
       return reduceForkPanel(state, action);
@@ -1027,7 +1082,10 @@ function reduceApp(state: AppState, action: Action): AppState {
     case "groupDeleted": {
       const groups = state.groups.filter((g) => g.id !== action.groupId);
       const selectedId = state.selectedId === action.groupId ? (state.bots[0]?.id ?? "") : state.selectedId;
-      return { ...state, groups, selectedId };
+      const activeView = state.selectedId === action.groupId && state.activeView === "chat"
+        ? botViewFor(state, selectedId, state.bots.find((bot) => bot.id === selectedId))
+        : state.activeView;
+      return { ...state, groups, selectedId, activeView };
     }
     case "instances":
       return { ...state, instances: action.instances };
@@ -1063,20 +1121,23 @@ function reduceApp(state: AppState, action: Action): AppState {
         };
       }
       const opened = state.bots.find((b) => b.id === action.id);
+      const activeView = botViewFor(state, action.id, opened);
+      const switched = withMascotMotion(
+        {
+          ...(action.id === state.selectedId && state.activeView === activeView ? state : closeUnpinnedTray(state)),
+          unreadDivider: activeView === "chat" && opened
+            ? openedUnreadDivider(state, opened.threadId, threadOpensUnread(opened), visibleMessages(opened), threadReadCursor(opened), opened.hasMore)
+            : state.unreadDivider,
+          activeView,
+          selectedId: action.id,
+          forkPanel: null,
+        },
+        action.id,
+        "switch",
+      );
+      if (activeView !== "chat") return switched;
       return updateBot(
-        withMascotMotion(
-          {
-            ...(action.id === state.selectedId && state.activeView === "chat" ? state : closeUnpinnedTray(state)),
-            unreadDivider: opened
-              ? openedUnreadDivider(state, opened.threadId, threadOpensUnread(opened), visibleMessages(opened), threadReadCursor(opened), opened.hasMore)
-              : state.unreadDivider,
-            activeView: "chat",
-            selectedId: action.id,
-            forkPanel: null,
-          },
-          action.id,
-          "switch",
-        ),
+        switched,
         action.id,
         (b) => ({ ...b, unread: Boolean(b.tasks?.some((task) => task.threadId !== b.threadId && task.unread && !task.routineRunId && task.archivedAt === undefined)), tasks: b.tasks?.map((task) => task.threadId === b.threadId ? { ...task, unread: false } : task) }),
       );
@@ -1111,7 +1172,11 @@ function reduceApp(state: AppState, action: Action): AppState {
       const selectedId =
         state.selectedId === action.botId ? (bots.find((b) => !b.hidden)?.id ?? bots[0]?.id ?? "") : state.selectedId;
       const { [action.botId]: _deleted, ...deletingBots } = state.deletingBots;
-      return reconcileModelVariantSessions({ ...state, bots, selectedId, deletingBots });
+      const botViews = withBotView(state.botViews, action.botId, "chat");
+      const activeView = state.selectedId === action.botId
+        ? botViewFor({ botViews }, selectedId, bots.find((b) => b.id === selectedId))
+        : state.activeView;
+      return reconcileModelVariantSessions({ ...state, bots, selectedId, activeView, deletingBots, botViews });
     }
     case "botDeletionPending": {
       if (action.on) {
@@ -1689,10 +1754,15 @@ function reduceApp(state: AppState, action: Action): AppState {
     case "regenerateTaskTitle":
       return state;
     case "newTask":
-      return action.cwd !== undefined ? state : { ...closeUnpinnedTray(state), selectedId: action.botId, activeView: "chat" };
+      return action.cwd !== undefined
+        ? state
+        : { ...closeUnpinnedTray(state), selectedId: action.botId, activeView: "chat", botViews: withBotView(state.botViews, action.botId, "chat") };
     case "switchTask": {
       const { [action.threadId]: _old, ...backgroundThreadEvents } = state.backgroundThreadEvents;
-      return updateBot({ ...closeTrayUnlessShown(state, action.botId, action.threadId), backgroundThreadEvents, selectedId: action.botId, forkPanel: null, activeView: "chat", revealThread: { threadId: action.threadId, nonce: (state.revealThread?.nonce ?? 0) + 1 } }, action.botId,
+      const target = state.bots.find((bot) => bot.id === action.botId);
+      const activeView = action.preserveView ? botViewFor(state, action.botId, target) : "chat";
+      const botViews = action.preserveView ? state.botViews : withBotView(state.botViews, action.botId, "chat");
+      return updateBot({ ...closeTrayUnlessShown(state, action.botId, action.threadId), backgroundThreadEvents, selectedId: action.botId, forkPanel: null, activeView, botViews, revealThread: { threadId: action.threadId, nonce: (state.revealThread?.nonce ?? 0) + 1 } }, action.botId,
         (bot) => ({ ...bot, switchingTo: action.threadId }));
     }
     case "switchTaskFailed":
@@ -1826,6 +1896,7 @@ export const initialState: AppState = {
   liveCallLookupSeq: 0,
   selectedId: "",
   activeView: "chat",
+  botViews: {},
   routines: [],
   routineRuns: [], routineRunsSince: null,
   routinesLoadState: "loading",
@@ -2061,7 +2132,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     ...bot,
     tasks: bot.tasks?.map((task) => ({ ...task, ...taskPatchFields(taskWrites.get(task.threadId)?.patch ?? {}) })),
   });
-  const [store] = useState(() => createAppStore<AppState, Action, ServerFrame>(reducer, withRememberedTrayPin(restoreBotSettingsSection(initialState))));
+  const [store] = useState(() => createAppStore<AppState, Action, ServerFrame>(reducer, withRememberedBotViews(withRememberedTrayPin(restoreBotSettingsSection(initialState)))));
   const rawDispatch = store.dispatch, state = useSyncExternalStore(store.subscribe, store.getState, store.getState);
   const stateRef = useRef(state), selectionRevision = useRef(0);
   stateRef.current = state;
@@ -2075,6 +2146,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (state.selectedId) rememberConversation(state.selectedId);
   }, [state.selectedId]);
+  useEffect(() => {
+    if (state.hydrated) rememberBotViews(state.botViews);
+  }, [state.hydrated, state.botViews]);
   useEffect(() => {
     if (state.settingsOpen && state.botSettingsExpandAccordion) rememberBotSection(state.botSettingsSection);
   }, [state.settingsOpen, state.botSettingsExpandAccordion, state.botSettingsSection]);
@@ -2557,7 +2631,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           const id = action.type === "select" ? action.id : action.botId;
           const bot = stateRef.current.bots.find((b) => b.id === id);
           const group = stateRef.current.groups.find((g) => g.id === id);
-          if (bot?.unread) {
+          if (bot?.unread && (action.type !== "select" || store.getState().activeView === "chat")) {
             api(`/api/bots/${id}/read`, { method: "POST", body: JSON.stringify({ threadId: bot.threadId }) }).catch(() => {});
           } else if (!roomFeedShows(stateRef.current.config, group) && (group?.tasks?.find((task) => task.threadId === group.threadId)?.unread ?? group?.unread)) {
             api(`/api/groups/${id}/read`, { method: "POST" }).catch(() => {});
@@ -2736,9 +2810,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           const ready = action.type === "newTask"
             ? botPatchQueue.flush(action.botId)
             : Promise.resolve();
+          const unseen = action.type === "switchTask" && (Boolean(action.auto) || store.getState().activeView !== "chat");
           void ready.then(() => api<{ bot: Bot }>(action.type === "newTask"
             ? `/api/bots/${action.botId}/tasks`
-            : `/api/bots/${action.botId}/tasks/${action.threadId}${action.whole ? (action.auto ? "?seen=0" : "") : `?messages=${SWITCH_MESSAGE_COUNT}${action.auto ? "&seen=0" : ""}`}`, { method: "POST", body: JSON.stringify(action.type === "newTask" ? { projectId: action.projectId, cwd: action.cwd } : {}) }))
+            : `/api/bots/${action.botId}/tasks/${action.threadId}${action.whole ? (unseen ? "?seen=0" : "") : `?messages=${SWITCH_MESSAGE_COUNT}${unseen ? "&seen=0" : ""}`}`, { method: "POST", body: JSON.stringify(action.type === "newTask" ? { projectId: action.projectId, cwd: action.cwd } : {}) }))
             .then((r) => {
               if (action.type === "newTask") { settle(null); action.onCreated?.(); }
               if (navigation.get(action.botId) !== revision) return;
@@ -2746,7 +2821,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               const selectsAfterCreation = action.type === "newTask" && action.cwd !== undefined;
               if (selectsAfterCreation && selectionRevision.current !== selectedAtStart) return;
               dispatch({ type: "taskSwitched", bot: r.bot });
-              if (selectsAfterCreation) rawDispatch({ type: "select", id: action.botId });
+              if (selectsAfterCreation) {
+                rawDispatch({ type: "select", id: action.botId });
+                if (store.getState().activeView === "ui-interface") rawDispatch({ type: "showChat" });
+              }
             })
             .catch((error) => {
               if (action.type === "switchTask" && navigation.get(action.botId) === revision) {

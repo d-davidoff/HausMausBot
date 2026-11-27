@@ -42,15 +42,16 @@ export function awayFromMainThread(bot: Pick<NotificationThreadOwner, "threadId"
  * shared chat under "Team". */
 export function openBot(
   dispatch: (action: Action) => void,
-  bot: Pick<NotificationThreadOwner, "id" | "threadId" | "mainThreadId" | "tasks"> & { yourAccess?: string },
+  bot: Pick<NotificationThreadOwner, "id" | "threadId" | "mainThreadId" | "tasks"> & { yourAccess?: string; uiInterfaceLayout?: unknown },
   threadsShown: boolean,
 ) {
+  const preserveView = Boolean(bot.uiInterfaceLayout);
   const shared = teamThreadToOpen(bot, teamChats());
-  if (shared) return openBotThread(dispatch, bot, shared, threadsShown);
-  if (openOwnTeamChat(dispatch, bot, (threadId) => openBotThread(dispatch, bot, threadId, threadsShown))) return;
+  if (shared) return openBotThread(dispatch, bot, shared, threadsShown, preserveView);
+  if (openOwnTeamChat(dispatch, bot, (threadId) => openBotThread(dispatch, bot, threadId, threadsShown, preserveView))) return;
   const opened = botOpensTo(bot, threadsShown);
   if (opened === bot.threadId) dispatch({ type: "select", id: bot.id });
-  else openBotThread(dispatch, bot, opened, threadsShown);
+  else openBotThread(dispatch, bot, opened, threadsShown, preserveView);
 }
 
 const markRank = (task: RowThread): number | null => {
@@ -75,13 +76,13 @@ export function markedThread(bot: Pick<NotificationThreadOwner, "threadId" | "ma
  * the bot as ever. Every other way into a bot is `openBot`. On a team a bot's row is the person's own chat. */
 export function openBotRow(
   dispatch: (action: Action) => void,
-  bot: Pick<NotificationThreadOwner, "id" | "threadId" | "mainThreadId" | "tasks"> & { yourAccess?: string },
+  bot: Pick<NotificationThreadOwner, "id" | "threadId" | "mainThreadId" | "tasks"> & { yourAccess?: string; uiInterfaceLayout?: unknown },
   threadsShown: boolean,
   onScreen: boolean,
 ) {
   const marked = teamChats() ? null : markedThread(bot, threadsShown);
   if (!marked || marked === botOpensTo(bot, threadsShown) || (onScreen && marked === bot.threadId)) openBot(dispatch, bot, threadsShown);
-  else openBotThread(dispatch, bot, marked, threadsShown);
+  else openBotThread(dispatch, bot, marked, threadsShown, Boolean(bot.uiInterfaceLayout));
 }
 
 /** With threads hidden the switch alone selects the bot, so the thread left behind keeps its unread mark. */
@@ -90,9 +91,10 @@ export function openBotThread(
   bot: Pick<NotificationThreadOwner, "id" | "threadId">,
   threadId: string,
   threadsShown: boolean,
+  preserveView = false,
 ) {
   if (threadsShown || threadId === bot.threadId) dispatch({ type: "select", id: bot.id });
-  dispatch({ type: "switchTask", botId: bot.id, threadId });
+  dispatch({ type: "switchTask", botId: bot.id, threadId, ...(preserveView ? { preserveView: true } : {}) });
 }
 
 /** A hand-off's chip for work in a room: the thread it names while the room still has it, else the room. */

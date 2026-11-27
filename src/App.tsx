@@ -438,7 +438,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
         onClose={closeDrawer}
       />}
       {state.activeView === "ui-interface" && bot?.uiInterfaceLayout ? (
-        <BotInterfaceView bot={bot} />
+        <BotInterfaceView key={bot.id} bot={bot} />
       ) : state.activeView === "team-map" ? (
         <TeamMapPage />
       ) : state.activeView === "files" ? (
