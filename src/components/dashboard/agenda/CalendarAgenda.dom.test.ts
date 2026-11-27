@@ -4,6 +4,7 @@ import { createRoot } from "react-dom/client";
 import { afterEach, expect, it, vi } from "vitest";
 
 const fixture = vi.hoisted(() => ({ connected: true }));
+vi.mock("../calendar/GoogleCalendarConnection", () => ({ GoogleCalendarConnection: () => null }));
 vi.mock("@/lib/connected-apps", () => ({
   connectorStatusMemory: () => ({ authoritative: true, services: { googlecalendar: { connected: fixture.connected } } }),
   preloadConnectedApps: async () => ({ authoritative: true, refused: false, services: { googlecalendar: { connected: fixture.connected } } }),
@@ -13,6 +14,8 @@ vi.mock("@/state/store-select", () => ({ useStoreSelector: (select: (state: unkn
 
 import { setRelayLink } from "@/lib/relay-server";
 import { CalendarAgenda } from "./CalendarAgenda";
+import { CalendarProvider } from "../calendar/CalendarController";
+const agenda = (view: "configuration" | "presentation" = "presentation") => createElement(CalendarProvider, { children: createElement(CalendarAgenda, { view }) });
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const nativeFetch = globalThis.fetch;
@@ -67,7 +70,7 @@ it("routes reads and saves through serverFetch (RelayLink), recovers from save f
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root = createRoot(container);
-  await act(async () => { root.render(createElement(CalendarAgenda)); });
+  await act(async () => { root.render(agenda("configuration")); });
   await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
   expect(container.textContent).toContain("Personal");
   expect(relayCalls[0]).toEqual({ path: "/api/dashboard/calendar-agenda", method: "GET" });
@@ -76,8 +79,7 @@ it("routes reads and saves through serverFetch (RelayLink), recovers from save f
   await act(async () => { boxes[0]!.click(); });
   await act(async () => { await new Promise((resolve) => setTimeout(resolve, 10)); });
   expect(container.querySelector('[role="alert"]')?.textContent).toContain("Couldn’t save your calendar selection.");
-  const settingsButton = container.querySelector<HTMLButtonElement>("[aria-label='Calendar settings']")!;
-  expect(settingsButton.disabled).toBe(false);
+  expect(container.querySelector("[aria-label='Calendar settings']")).toBeNull();
 
   await act(async () => { container.querySelector<HTMLButtonElement>('[role="alert"] button')!.click(); });
   await act(async () => { await new Promise((resolve) => setTimeout(resolve, 10)); });
@@ -87,7 +89,7 @@ it("routes reads and saves through serverFetch (RelayLink), recovers from save f
   await act(async () => { await new Promise((resolve) => setTimeout(resolve, 10)); });
   expect(selectedCalendarIds).toEqual(["primary", "team"]);
 
-  await act(async () => { settingsButton.click(); });
+  await act(async () => { root.render(agenda()); });
   await act(async () => { await new Promise((resolve) => setTimeout(resolve, 10)); });
   expect(relayCalls.at(-1)).toEqual({ path: "/api/dashboard/calendar-agenda?calendarId=primary&calendarId=team", method: "GET" });
   expect(container.querySelector("[data-agenda-month] button")?.firstChild?.textContent).toBe("November 2026");
@@ -105,7 +107,7 @@ it("routes reads and saves through serverFetch (RelayLink), recovers from save f
   const returningContainer = document.createElement("div");
   document.body.appendChild(returningContainer);
   const returningRoot = createRoot(returningContainer);
-  await act(async () => { returningRoot.render(createElement(CalendarAgenda)); });
+  await act(async () => { returningRoot.render(agenda()); });
   await act(async () => { await new Promise((resolve) => setTimeout(resolve, 10)); });
   expect(returningContainer.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')).toHaveLength(0);
   expect(returningContainer.textContent).toContain("Updated pickup");
@@ -119,7 +121,7 @@ it("renders no agenda loading placeholders and makes no network requests while C
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root = createRoot(container);
-  await act(async () => { root.render(createElement(CalendarAgenda)); });
+  await act(async () => { root.render(agenda()); });
   await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
   expect(container.querySelector('[aria-label="Loading calendars"]')).toBeNull();
   expect(container.querySelector('[aria-label="Loading agenda"]')).toBeNull();
@@ -127,45 +129,18 @@ it("renders no agenda loading placeholders and makes no network requests while C
   await act(async () => { root.unmount(); });
 });
 
-it("renders cached agenda events instantly via stale-while-revalidate before background revalidation finishes", async () => {
+it("does not trust cached calendars or events before authorization and saved selection resolve", async () => {
   sessionStorage.setItem("openmausbot.dashboard.agenda", JSON.stringify({
-    calendars: [{ id: "primary", name: "Personal", primary: true, color: "#1a73e8" }],
-    selectedCalendarIds: ["primary"],
-    days: [{ date: "2026-11-26", events: [
-      { id: "primary:ev-cached", calendarId: "primary", title: "Instant cached class", start: "2026-11-26T10:00:00Z", end: "2026-11-26T11:00:00Z", allDay: false, color: "#1a73e8" },
-    ] }],
-    updatedAt: "2026-11-26T09:00:00.000Z",
+    calendars: [{ id: "primary", name: "Personal", primary: true }], selectedCalendarIds: ["primary"],
+    days: [{ date: "2026-11-26", events: [{ title: "Private cached event" }] }],
   }));
-
-  let resolveFetch: ((res: Response) => void) | undefined;
-  setRelayLink({
-    close: () => undefined,
-    fetch: () => new Promise<Response>((resolve) => {
-      resolveFetch = resolve;
-    }),
-  });
-
+  let resolveRead: ((response: Response) => void) | undefined;
+  setRelayLink({ close: () => undefined, fetch: () => new Promise<Response>((resolve) => { resolveRead = resolve; }) });
   const container = document.createElement("div");
-  document.body.appendChild(container);
   const root = createRoot(container);
-
-  // Mount with pending network fetch
-  await act(async () => {
-    root.render(createElement(CalendarAgenda));
-  });
-
-  // Cached event is rendered instantly without waiting for network or showing loading skeleton
-  expect(container.textContent).toContain("Instant cached class");
-  expect(container.querySelector('[aria-label="Loading agenda"]')).toBeNull();
-
-  // Background fetch resolves with fresh event
-  await act(async () => {
-    resolveFetch?.(jsonResponse([{ date: "2026-11-26", events: [
-      { id: "primary:ev-fresh", calendarId: "primary", title: "Fresh revalidated class", start: "2026-11-26T10:00:00Z", end: "2026-11-26T11:00:00Z", allDay: false, color: "#1a73e8" },
-    ] }]));
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  });
-
-  expect(container.textContent).toContain("Fresh revalidated class");
+  await act(async () => { root.render(agenda()); });
+  expect(container.textContent).not.toContain("Private cached event");
+  await act(async () => { resolveRead?.(jsonResponse({ calendars: [], selectedCalendarIds: [] })); });
+  expect(container.textContent).toContain("Choose calendars in Configure dashboard");
   await act(async () => { root.unmount(); });
 });

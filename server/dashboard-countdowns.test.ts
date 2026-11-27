@@ -70,6 +70,7 @@ describe("dashboard countdowns route", () => {
     expect(response?.status).toBe(200);
     const body = response!.body as any;
     expect(body.source).toBe("google");
+    expect(body.calendars).toEqual([{ id: "primary", name: "Primary" }]);
     expect(body.items.length).toBe(1);
     expect(body.items[0]).toEqual({
       id: "primary:birthday",

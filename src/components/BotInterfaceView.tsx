@@ -12,10 +12,10 @@ import DashboardPage from "./dashboard/DashboardPage";
 import { CheatSheetPage } from "./ui-interface/CheatSheetPage";
 import { CustomPage } from "./ui-interface/CustomPage";
 
-function renderInterfaceLayout(layout: Bot["uiInterfaceLayout"]) {
+function renderInterfaceLayout(layout: Bot["uiInterfaceLayout"], botId: string) {
   switch (layout) {
     case "dashboard":
-      return <DashboardPage />;
+      return <DashboardPage key={botId} />;
     case "cheat-sheet":
       return <CheatSheetPage />;
     case "custom":
@@ -62,7 +62,7 @@ export function BotInterfaceView({ bot }: { bot: Bot }) {
         </div>
       </div>
       <div data-bot-interface-page="" className="relative z-0 min-h-0 w-full flex-1">
-        {renderInterfaceLayout(bot.uiInterfaceLayout)}
+        {renderInterfaceLayout(bot.uiInterfaceLayout, bot.id)}
       </div>
     </main>
   );

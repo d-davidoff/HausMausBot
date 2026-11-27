@@ -16,6 +16,7 @@ vi.mock("@/state/store-select", () => ({
 }));
 
 import { setRelayLink } from "@/lib/relay-server";
+import { CalendarProvider } from "../calendar/CalendarController";
 import { CountdownContent, CountdownList } from "./CountdownList";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -41,6 +42,7 @@ it("renders countdown cards, handles empty/error/loading/disconnected states, an
     fetch: async (path, request) => {
       const method = request?.method ?? "GET";
       relayCalls.push({ path, method });
+      if (path === "/api/dashboard/calendar-agenda") return jsonResponse({ calendars: [{ id: "primary", name: "Personal", primary: true }], selectedCalendarIds: [] });
       if (path.startsWith("/api/dashboard/countdowns")) {
         return jsonResponse({
           items: [
@@ -76,7 +78,7 @@ it("renders countdown cards, handles empty/error/loading/disconnected states, an
   const root = createRoot(container);
 
   await act(async () => {
-    root.render(createElement(CountdownList));
+    root.render(createElement(CalendarProvider, { children: createElement(CountdownList) }));
   });
   await act(async () => {
     await new Promise((resolve) => setTimeout(resolve, 10));
@@ -130,7 +132,7 @@ it("renders loading, empty, and disconnected states clearly in CountdownContent"
   await act(async () => {
     root.render(createElement(CountdownContent, { snapshot: null, loading: false, failed: false, connected: false }));
   });
-  expect(container.textContent).toContain("Google Calendar is disconnected.");
+  expect(container.textContent).toContain("Connect Google Calendar in Configure dashboard.");
 
   // Unavailable / error state without cache
   let retried = false;
@@ -170,4 +172,25 @@ it("renders loading, empty, and disconnected states clearly in CountdownContent"
   await act(async () => {
     root.unmount();
   });
+});
+
+
+it("keeps countdown tiles in an unframed horizontal scrolling row", async () => {
+  const snapshot = {
+    items: Array.from({ length: 12 }, (_, index) => ({
+      id: `event-${index}`, calendarId: "primary", eventId: `event-${index}`,
+      title: `Countdown ${index}`, targetDate: "2026-12-01", daysRemaining: index + 1, allDay: true,
+    })),
+    updatedAt: "2026-11-27T12:00:00.000Z", source: "google" as const,
+  };
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  await act(async () => root.render(createElement(CountdownContent, { snapshot })));
+  const row = container.querySelector('[aria-label="Countdowns"]')!;
+  expect(row.className).toContain("overflow-x-auto");
+  expect(row.className).toContain("max-w-full");
+  expect(row.querySelectorAll("li")).toHaveLength(12);
+  expect(row.className).not.toContain("border");
+  await act(async () => root.unmount());
 });

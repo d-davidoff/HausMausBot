@@ -1,9 +1,6 @@
-import { useEffect, useState } from "react";
-
+import { useDashboardCalendar } from "./CalendarController";
 import { appCatalogMemory } from "@/lib/app-catalog-cache";
-import { preloadConnectedApps, connectorStatusMemory } from "@/lib/connected-apps";
-import { hasActiveConnection } from "@/lib/connector-status";
-import { useStoreDispatch, useStoreSelector } from "@/state/store-select";
+import { useStoreDispatch } from "@/state/store-select";
 import { AppTileView, type AppTileActions } from "../../AppTile";
 import type { ToolkitCard } from "../../ServiceIcon";
 
@@ -15,28 +12,10 @@ const FALLBACK_CARD: ToolkitCard = {
   domain: "calendar.google.com",
 };
 
-function initialConnectionState(): boolean | null {
-  const inventory = connectorStatusMemory();
-  return inventory?.authoritative ? hasActiveConnection(inventory.services.googlecalendar) : null;
-}
-
 export function GoogleCalendarConnection() {
   const dispatch = useStoreDispatch();
-  const pluginsOpen = useStoreSelector((state) => state.pluginsOpen);
-  const [connected, setConnected] = useState(initialConnectionState);
-
-  useEffect(() => {
-    if (pluginsOpen) return;
-    let current = true;
-    void preloadConnectedApps(true).then(({ services, authoritative, refused }) => {
-      if (current) setConnected(authoritative && !refused ? hasActiveConnection(services.googlecalendar) : null);
-    });
-    return () => {
-      current = false;
-    };
-  }, [pluginsOpen]);
-
-  if (connected !== false) return null;
+  const { connection } = useDashboardCalendar();
+  if (connection !== "needs-setup") return null;
 
   const card = appCatalogMemory()?.cards.find((item) => item.slug === "googlecalendar") ?? FALLBACK_CARD;
   const openApps = () => dispatch({ type: "togglePlugins", open: true, surface: "apps" });

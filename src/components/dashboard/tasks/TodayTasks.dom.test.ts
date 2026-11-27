@@ -417,7 +417,7 @@ it("supports multi-account selection, family member fallback when inventory is r
   const root = createRoot(container);
 
   await act(async () => {
-    root.render(createElement(TodayTasks));
+    root.render(createElement(TodayTasks, { view: "configuration" }));
     await vi.advanceTimersByTimeAsync(10);
   });
 
@@ -430,6 +430,7 @@ it("supports multi-account selection, family member fallback when inventory is r
     await vi.advanceTimersByTimeAsync(10);
   });
 
+  await act(async () => { root.render(createElement(TodayTasks, { view: "presentation" })); });
   expect(container.textContent).toContain("Parents task");
 
   // Start completing Parents task, then switch to Kids while completion is in flight.
@@ -438,11 +439,16 @@ it("supports multi-account selection, family member fallback when inventory is r
   });
 
   await act(async () => {
+    root.render(createElement(TodayTasks, { view: "configuration" }));
+  });
+  await act(async () => {
+    const select = container.querySelector<HTMLSelectElement>('select[aria-label="Google Tasks account"]')!;
     select.value = "acc-b";
     select.dispatchEvent(new Event("change", { bubbles: true }));
     await vi.advanceTimersByTimeAsync(10);
   });
 
+  await act(async () => { root.render(createElement(TodayTasks, { view: "presentation" })); });
   expect(container.textContent).toContain("Kids task");
 
   // Even when acc-a completion resolves later, it bound to acc-a and never marks Kids task completed.
@@ -590,7 +596,7 @@ it("keeps completion disabled after an ambiguous timeout when the status refresh
   });
 });
 
-it("renders cached tasks instantly via stale-while-revalidate before revalidation finishes", async () => {
+it("withholds cached tasks until the account and its data have been verified", async () => {
   vi.useFakeTimers();
   vi.setSystemTime(new Date("2026-11-26T12:00:00+01:00"));
 
@@ -638,8 +644,8 @@ it("renders cached tasks instantly via stale-while-revalidate before revalidatio
     await vi.advanceTimersByTimeAsync(0);
   });
 
-  expect(container.textContent).toContain("Instant cached chore");
-  expect(container.textContent).not.toContain("Loading tasks…");
+  expect(container.textContent).not.toContain("Instant cached chore");
+  expect(container.textContent).toContain("Loading tasks…");
 
   await act(async () => {
     resolveFetch?.(
@@ -678,7 +684,7 @@ it("renders cached tasks instantly via stale-while-revalidate before revalidatio
   });
 });
 
-it("ignores cached tasks from a previous Berlin day and keeps stale same-day tasks visible on read failure", async () => {
+it("ignores cached tasks from any prior visit when authorization cannot be verified", async () => {
   vi.useFakeTimers();
   vi.setSystemTime(new Date("2026-11-26T12:00:00+01:00"));
 
@@ -719,7 +725,7 @@ it("ignores cached tasks from a previous Berlin day and keeps stale same-day tas
     root.unmount();
   });
 
-  // Same-day cached tasks remain visible if background/initial revalidation fails transiently.
+
   sessionStorage.setItem(
     "openmausbot.dashboard.tasks",
     JSON.stringify({
@@ -764,13 +770,13 @@ it("ignores cached tasks from a previous Berlin day and keeps stale same-day tas
     await vi.advanceTimersByTimeAsync(10);
   });
 
-  expect(secondContainer.textContent).toContain("Stale same-day chore");
-  expect(secondContainer.textContent).toContain("Couldn’t refresh tasks. Showing previously loaded tasks.");
+  expect(secondContainer.textContent).not.toContain("Stale same-day chore");
+  expect(secondContainer.textContent).toContain("Google Tasks could not be read.");
 
   // Once the connection is reported missing, the stale cache is cleared.
   nextStatus = { status: 404, body: { error: "Not connected", code: "not_connected" } };
   await act(async () => {
-    secondContainer.querySelector<HTMLButtonElement>('[role="status"] button')!.click();
+    secondContainer.querySelector<HTMLButtonElement>('[role="alert"] button')!.click();
     await vi.advanceTimersByTimeAsync(10);
   });
 

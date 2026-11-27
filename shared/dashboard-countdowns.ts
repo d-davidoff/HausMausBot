@@ -25,6 +25,8 @@ export interface CountdownSnapshot {
   items: CountdownItem[];
   updatedAt: string;
   source: "google";
+  /** Calendars resolved after applying saved selections and server fallback sources. */
+  calendars?: { id: string; name: string }[];
 }
 
 export interface CalendarEventLike {

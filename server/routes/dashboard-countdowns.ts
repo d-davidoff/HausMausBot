@@ -101,6 +101,7 @@ export function createDashboardCountdownsRoute(deps: {
         items: [],
         updatedAt: now.toISOString(),
         source: "google",
+        calendars: targetCalendarIds.map((id) => ({ id, name: availableById.get(id)!.name })),
       };
       return json(res, 200, emptySnapshot);
     }
@@ -154,6 +155,7 @@ export function createDashboardCountdownsRoute(deps: {
         items,
         updatedAt: now.toISOString(),
         source: "google",
+        calendars: targetCalendarIds.map((id) => ({ id, name: availableById.get(id)!.name })),
       };
       snapshotCache.set(cacheKey, { at: now.getTime(), snapshot });
       return snapshot;
